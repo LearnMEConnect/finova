@@ -48,8 +48,8 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       else transactionSum -= t.amount;
     });
 
-    let totalAssets = assets.reduce((sum, a) => sum + a.value, 0);
-    let totalLiabilities = liabilities.reduce((sum, l) => sum + l.value, 0);
+    const totalAssets = assets.reduce((sum, a) => sum + a.value, 0);
+    const totalLiabilities = liabilities.reduce((sum, l) => sum + l.value, 0);
     
     return totalAssets - totalLiabilities + transactionSum;
   }, [transactions, assets, liabilities]);
