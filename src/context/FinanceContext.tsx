@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useMemo } from 'react';
-import { Transaction, Asset, Liability } from '../types/finance';
+import { Transaction, Asset, Liability, FinancialGoal } from '../types/finance';
 import { mockTransactions, mockAssets, mockLiabilities } from '../data/mock';
 
 interface FinanceContextType {
@@ -11,6 +11,11 @@ interface FinanceContextType {
   addAsset: (a: Asset) => void;
   liabilities: Liability[];
   addLiability: (l: Liability) => void;
+  baselineNetWorth: number;
+  setBaselineNetWorth: (v: number) => void;
+  goals: FinancialGoal[];
+  addGoal: (g: FinancialGoal) => void;
+  allocateToGoal: (goalId: string, amount: number) => void;
   netWorth: number;
 }
 
@@ -20,6 +25,8 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const [transactions, setTransactions] = useState<Transaction[]>(mockTransactions);
   const [assets, setAssets] = useState<Asset[]>(mockAssets);
   const [liabilities, setLiabilities] = useState<Liability[]>(mockLiabilities);
+  const [baselineNetWorth, setBaselineNetWorth] = useState<number>(0);
+  const [goals, setGoals] = useState<FinancialGoal[]>([]);
 
   const addTransaction = (tx: Transaction) => {
     let resolvedType = tx.type;
@@ -41,6 +48,24 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     setLiabilities((prev) => [newL, ...prev]);
   };
 
+  const addGoal = (g: FinancialGoal) => {
+    const newG = { ...g, id: Math.random().toString(36).substr(2, 9) };
+    setGoals((prev) => [newG, ...prev]);
+  };
+
+  const allocateToGoal = (goalId: string, amount: number) => {
+    const goalTx: Transaction = {
+      id: Math.random().toString(36).substr(2, 9),
+      amount: amount,
+      category: 'Goal Contribution',
+      date: new Date().toISOString().split('T')[0],
+      description: `Contribution to Goal`,
+      type: 'variable-expense',
+      goalId: goalId
+    };
+    setTransactions((prev) => [goalTx, ...prev].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+  };
+
   const netWorth = useMemo(() => {
     let transactionSum = 0;
     transactions.forEach(t => {
@@ -51,14 +76,16 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     const totalAssets = assets.reduce((sum, a) => sum + a.value, 0);
     const totalLiabilities = liabilities.reduce((sum, l) => sum + l.value, 0);
     
-    return totalAssets - totalLiabilities + transactionSum;
-  }, [transactions, assets, liabilities]);
+    return baselineNetWorth + totalAssets - totalLiabilities + transactionSum;
+  }, [baselineNetWorth, transactions, assets, liabilities]);
 
   return (
     <FinanceContext.Provider value={{ 
       transactions, addTransaction, 
       assets, addAsset, 
       liabilities, addLiability, 
+      baselineNetWorth, setBaselineNetWorth,
+      goals, addGoal, allocateToGoal,
       netWorth 
     }}>
       {children}
