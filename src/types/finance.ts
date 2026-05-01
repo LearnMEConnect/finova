@@ -7,7 +7,6 @@ export interface Transaction {
   date: string;
   description: string;
   type?: TransactionType;
-  goalId?: string;
 }
 
 export interface Asset {
@@ -22,13 +21,6 @@ export interface Liability {
   name: string;
   type: string;
   value: number;
-}
-
-export interface FinancialGoal {
-  id: string;
-  name: string;
-  targetAmount: number;
-  deadlineDate: string;
 }
 
 export interface BudgetCategory {

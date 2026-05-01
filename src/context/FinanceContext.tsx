@@ -3,27 +3,18 @@
 /**
  * FinanceContext.tsx
  * ─────────────────────────────────────────────────────────────────────────────
- * Global finance state provider.
+ * Single source of truth for all financial data. Every component reads from
+ * here, every mutation (add / edit / delete) happens here, and Net Worth
+ * recomputes automatically via useMemo.
  *
- * KEY CHANGES (Data Validation & Integrity):
- *
- * 1. addTransaction() now runs the same validation gate that the form uses,
- *    acting as a second-layer defence against programmatic bad data.
- *
- * 2. safeAmount() — a utility that clamps, rounds, and sanitises any numeric
- *    input before it enters state. Prevents NaN, Infinity, negatives, and
- *    extreme outliers from corrupting net-worth or cash-flow totals.
- *
- * 3. Net Worth computation uses safeAmount() on every transaction, asset,
- *    and liability value so an outlier injected into mock data (or via a
- *    future API) cannot skew the figure.
- *
- * 4. MAX_SINGLE_TRANSACTION_AMOUNT is imported from the validation hook so
- *    the context and the form share the exact same ceiling.
+ * Exposed actions:
+ *   Transactions → add, update, delete
+ *   Assets       → add, update, delete
+ *   Liabilities  → add, update, delete
  */
 
 import React, { createContext, useContext, useState, useMemo } from "react";
-import { Transaction, Asset, Liability, FinancialGoal } from "../types/finance";
+import { Transaction, Asset, Liability } from "../types/finance";
 import { mockTransactions, mockAssets, mockLiabilities } from "../data/mock";
 import {
   MAX_TRANSACTION_AMOUNT,
@@ -32,45 +23,57 @@ import {
 
 // ── Safe numeric helpers ────────────────────────────────────────────────────
 
-/**
- * safeAmount(n)
- * Converts any value to a safe, finite, non-negative number ≤ ceiling.
- * Used everywhere a monetary value enters the computation pipeline.
- */
 function safeAmount(n: number, ceiling = MAX_TRANSACTION_AMOUNT): number {
   if (typeof n !== "number" || !isFinite(n) || isNaN(n)) return 0;
-  // Clamp to [0, ceiling] and round to 2 decimal places
-  const clamped = Math.min(Math.max(0, n), ceiling);
-  return Math.round(clamped * 100) / 100;
+  return Math.round(Math.min(Math.max(0, n), ceiling) * 100) / 100;
 }
 
-/**
- * safeAssetValue(n)
- * Assets / liabilities can be larger than a single transaction
- * (e.g. 401k balance), so we use a higher ceiling but still guard
- * against Infinity / NaN.
- */
 function safeAssetValue(n: number): number {
   if (typeof n !== "number" || !isFinite(n) || isNaN(n)) return 0;
-  const clamped = Math.min(Math.max(0, n), 10_000_000); // $10M ceiling
-  return Math.round(clamped * 100) / 100;
+  return Math.round(Math.min(Math.max(0, n), 10_000_000) * 100) / 100;
+}
+
+// ── ID generator ────────────────────────────────────────────────────────────
+
+function genId(): string {
+  return Math.random().toString(36).substr(2, 9);
+}
+
+// ── Sort helper ─────────────────────────────────────────────────────────────
+
+function sortByDate(txs: Transaction[]): Transaction[] {
+  return [...txs].sort(
+    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+  );
 }
 
 // ── Context type ────────────────────────────────────────────────────────────
 
 interface FinanceContextType {
+  // Transactions
   transactions: Transaction[];
   addTransaction: (tx: Transaction) => void;
+  updateTransaction: (id: string, patch: Partial<Transaction>) => void;
+  deleteTransaction: (id: string) => void;
+
+  // Assets
   assets: Asset[];
   addAsset: (a: Asset) => void;
+  updateAsset: (id: string, patch: Partial<Asset>) => void;
+  deleteAsset: (id: string) => void;
+
+  // Liabilities
   liabilities: Liability[];
   addLiability: (l: Liability) => void;
-  baselineNetWorth: number;
-  setBaselineNetWorth: (v: number) => void;
-  goals: FinancialGoal[];
-  addGoal: (g: FinancialGoal) => void;
-  allocateToGoal: (goalId: string, amount: number) => void;
+  updateLiability: (id: string, patch: Partial<Liability>) => void;
+  deleteLiability: (id: string) => void;
+
+  // Computed
   netWorth: number;
+  totalAssets: number;
+  totalLiabilities: number;
+  totalIncome: number;
+  totalExpenses: number;
 }
 
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
@@ -81,140 +84,146 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const [assets, setAssets] = useState<Asset[]>(mockAssets);
   const [liabilities, setLiabilities] =
     useState<Liability[]>(mockLiabilities);
-  const [baselineNetWorth, setBaselineNetWorth] = useState<number>(0);
-  const [goals, setGoals] = useState<FinancialGoal[]>([]);
 
-  // ── addTransaction ────────────────────────────────────────────────────────
-  // Second-layer validation: even if the form is bypassed, the context
-  // refuses invalid data.
+  // ── Transactions ──────────────────────────────────────────────────────────
+
   const addTransaction = (tx: Transaction) => {
-    // Run the pure validation function as a backend-style guard
-    const validationErrors = validateTransaction(
-      String(tx.amount),
-      tx.description,
-      tx.date
-    );
-    if (Object.keys(validationErrors).length > 0) {
-      console.warn(
-        "[FinanceContext] Rejected invalid transaction:",
-        validationErrors
-      );
-      return; // silently reject — the UI should have already caught this
-    }
+    const errors = validateTransaction(String(tx.amount), tx.description, tx.date);
+    if (Object.keys(errors).length > 0) return;
 
     let resolvedType = tx.type;
     if (!resolvedType) {
-      if (tx.amount > 0 && tx.category.toLowerCase() === "salary")
-        resolvedType = "income";
-      else resolvedType = "variable-expense";
+      resolvedType =
+        tx.amount > 0 && tx.category.toLowerCase() === "salary"
+          ? "income"
+          : "variable-expense";
     }
 
-    const newTx = {
+    const newTx: Transaction = {
       ...tx,
-      // Re-sanitise the amount through safeAmount
       amount: safeAmount(tx.amount),
       description: tx.description.trim(),
       type: resolvedType,
-      id: Math.random().toString(36).substr(2, 9),
+      id: genId(),
     };
+    setTransactions((prev) => sortByDate([newTx, ...prev]));
+  };
 
+  const updateTransaction = (id: string, patch: Partial<Transaction>) => {
     setTransactions((prev) =>
-      [newTx, ...prev].sort(
-        (a, b) =>
-          new Date(b.date).getTime() - new Date(a.date).getTime()
+      sortByDate(
+        prev.map((t) => {
+          if (t.id !== id) return t;
+          const updated = { ...t, ...patch };
+          if (patch.amount !== undefined) updated.amount = safeAmount(patch.amount);
+          if (patch.description !== undefined)
+            updated.description = patch.description.trim();
+          return updated;
+        })
       )
     );
   };
 
-  // ── addAsset / addLiability ───────────────────────────────────────────────
-  const addAsset = (a: Asset) => {
-    const newA = {
-      ...a,
-      value: safeAssetValue(a.value),
-      id: Math.random().toString(36).substr(2, 9),
-    };
-    setAssets((prev) => [newA, ...prev]);
+  const deleteTransaction = (id: string) => {
+    setTransactions((prev) => prev.filter((t) => t.id !== id));
   };
+
+  // ── Assets ────────────────────────────────────────────────────────────────
+
+  const addAsset = (a: Asset) => {
+    setAssets((prev) => [
+      { ...a, value: safeAssetValue(a.value), id: genId() },
+      ...prev,
+    ]);
+  };
+
+  const updateAsset = (id: string, patch: Partial<Asset>) => {
+    setAssets((prev) =>
+      prev.map((a) => {
+        if (a.id !== id) return a;
+        const updated = { ...a, ...patch };
+        if (patch.value !== undefined) updated.value = safeAssetValue(patch.value);
+        return updated;
+      })
+    );
+  };
+
+  const deleteAsset = (id: string) => {
+    setAssets((prev) => prev.filter((a) => a.id !== id));
+  };
+
+  // ── Liabilities ───────────────────────────────────────────────────────────
 
   const addLiability = (l: Liability) => {
-    const newL = {
-      ...l,
-      value: safeAssetValue(l.value),
-      id: Math.random().toString(36).substr(2, 9),
-    };
-    setLiabilities((prev) => [newL, ...prev]);
+    setLiabilities((prev) => [
+      { ...l, value: safeAssetValue(l.value), id: genId() },
+      ...prev,
+    ]);
   };
 
-  // ── Goals ─────────────────────────────────────────────────────────────────
-  const addGoal = (g: FinancialGoal) => {
-    const newG = { ...g, id: Math.random().toString(36).substr(2, 9) };
-    setGoals((prev) => [newG, ...prev]);
-  };
-
-  const allocateToGoal = (goalId: string, amount: number) => {
-    const safe = safeAmount(amount);
-    if (safe <= 0) return; // Guard: refuse zero / negative allocations
-
-    const goalTx: Transaction = {
-      id: Math.random().toString(36).substr(2, 9),
-      amount: safe,
-      category: "Goal Contribution",
-      date: new Date().toISOString().split("T")[0],
-      description: "Contribution to Goal",
-      type: "variable-expense",
-      goalId: goalId,
-    };
-    setTransactions((prev) =>
-      [goalTx, ...prev].sort(
-        (a, b) =>
-          new Date(b.date).getTime() - new Date(a.date).getTime()
-      )
+  const updateLiability = (id: string, patch: Partial<Liability>) => {
+    setLiabilities((prev) =>
+      prev.map((l) => {
+        if (l.id !== id) return l;
+        const updated = { ...l, ...patch };
+        if (patch.value !== undefined) updated.value = safeAssetValue(patch.value);
+        return updated;
+      })
     );
   };
 
-  // ── Net Worth — computed with safe parsing on every value ──────────────────
-  const netWorth = useMemo(() => {
-    let transactionSum = 0;
+  const deleteLiability = (id: string) => {
+    setLiabilities((prev) => prev.filter((l) => l.id !== id));
+  };
+
+  // ── Computed values ───────────────────────────────────────────────────────
+
+  const computed = useMemo(() => {
+    let income = 0;
+    let expenses = 0;
     transactions.forEach((t) => {
-      // safeAmount ensures no NaN / Infinity / negative leaks into the sum
       const safe = safeAmount(t.amount);
-      if (t.type === "income") transactionSum += safe;
-      else transactionSum -= safe;
+      if (t.type === "income") income += safe;
+      else expenses += safe;
     });
 
-    const totalAssets = assets.reduce(
-      (sum, a) => sum + safeAssetValue(a.value),
+    const assetsTotal = assets.reduce(
+      (s, a) => s + safeAssetValue(a.value),
       0
     );
-    const totalLiabilities = liabilities.reduce(
-      (sum, l) => sum + safeAssetValue(l.value),
+    const liabilitiesTotal = liabilities.reduce(
+      (s, l) => s + safeAssetValue(l.value),
       0
     );
 
-    // Round the final result to avoid floating-point drift
-    return (
-      Math.round(
-        (baselineNetWorth + totalAssets - totalLiabilities + transactionSum) *
-          100
-      ) / 100
-    );
-  }, [baselineNetWorth, transactions, assets, liabilities]);
+    return {
+      totalIncome: Math.round(income * 100) / 100,
+      totalExpenses: Math.round(expenses * 100) / 100,
+      totalAssets: Math.round(assetsTotal * 100) / 100,
+      totalLiabilities: Math.round(liabilitiesTotal * 100) / 100,
+      netWorth:
+        Math.round(
+          (assetsTotal - liabilitiesTotal + (income - expenses)) * 100
+        ) / 100,
+    };
+  }, [transactions, assets, liabilities]);
 
   return (
     <FinanceContext.Provider
       value={{
         transactions,
         addTransaction,
+        updateTransaction,
+        deleteTransaction,
         assets,
         addAsset,
+        updateAsset,
+        deleteAsset,
         liabilities,
         addLiability,
-        baselineNetWorth,
-        setBaselineNetWorth,
-        goals,
-        addGoal,
-        allocateToGoal,
-        netWorth,
+        updateLiability,
+        deleteLiability,
+        ...computed,
       }}
     >
       {children}
