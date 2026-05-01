@@ -7,7 +7,7 @@ import { useMemo } from 'react';
 import { Card, CardContent } from "@/components/ui/card";
 
 export default function NetWorthCard() {
-  const { transactions } = useFinance();
+  const { transactions, netWorth } = useFinance();
   
   const stats = useMemo(() => {
     let income = 0;
@@ -18,8 +18,6 @@ export default function NetWorthCard() {
     });
     return { income, expenses };
   }, [transactions]);
-
-  const netWorth = 45200 + stats.income - stats.expenses;
 
   return (
     <Card className="bg-white/5 backdrop-blur-xl border-white/10 col-span-12 lg:col-span-4 relative overflow-hidden">

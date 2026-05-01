@@ -1,4 +1,4 @@
-import { Transaction, MonthlyCashFlow, BudgetCategory } from '../types/finance';
+import { Transaction, MonthlyCashFlow, BudgetCategory, Asset, Liability } from '../types/finance';
 
 export const mockTransactions: Transaction[] = [
   { id: '1', amount: 5000, category: 'Salary', date: '2026-04-01', description: 'Monthly Salary', type: 'income' },
@@ -25,3 +25,12 @@ export const mockCashFlow: MonthlyCashFlow[] = [
 ];
 
 export const mockNetWorth = 45200;
+
+export const mockAssets: Asset[] = [
+  { id: 'a1', name: 'Chase Checking', type: 'Bank Account', value: 12500 },
+  { id: 'a2', name: 'Vanguard 401k', type: 'Investment', value: 37500 }
+];
+
+export const mockLiabilities: Liability[] = [
+  { id: 'l1', name: 'Auto Loan', type: 'Loan', value: 4800 }
+];

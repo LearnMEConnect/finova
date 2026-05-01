@@ -1,6 +1,6 @@
 "use client";
 
-import { Home, PieChart, WalletCards, Settings } from 'lucide-react';
+import { Home, PieChart, WalletCards, Settings, Briefcase } from 'lucide-react';
 import { cn } from '@/utils/helpers';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -12,6 +12,7 @@ export default function Navbar() {
     { name: 'Dashboard', icon: Home, href: '/' },
     { name: 'Transactions', icon: WalletCards, href: '/transactions' },
     { name: 'Goals', icon: PieChart, href: '/goals' },
+    { name: 'Portfolio', icon: Briefcase, href: '/portfolio' },
     { name: 'Settings', icon: Settings, href: '/settings' },
   ];
 

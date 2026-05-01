@@ -9,6 +9,20 @@ export interface Transaction {
   type: TransactionType;
 }
 
+export interface Asset {
+  id: string;
+  name: string;
+  type: string;
+  value: number;
+}
+
+export interface Liability {
+  id: string;
+  name: string;
+  type: string;
+  value: number;
+}
+
 export interface BudgetCategory {
   name: string;
   allocated: number;
